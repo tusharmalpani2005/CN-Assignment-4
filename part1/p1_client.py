@@ -35,7 +35,7 @@ class ReliableUDPClient:
     def create_ack(self, ack_num, timestamp_echo):
         """Create ACK packet"""
         # ACK packet: ack_num in seq field, no data, echo timestamp
-        header = struct.pack('!Idd', ack_num, 0.0, timestamp_echo)
+        header = struct.pack("!Idd", ack_num, 0.0, timestamp_echo)
         return header
 
     def parse_packet(self, packet):
@@ -43,8 +43,10 @@ class ReliableUDPClient:
         if len(packet) < self.HEADER_SIZE:
             return None, None, None
 
-        seq_num, timestamp, timestamp_echo = struct.unpack('!Idd', packet[:self.HEADER_SIZE])
-        data = packet[self.HEADER_SIZE:]
+        seq_num, timestamp, timestamp_echo = struct.unpack(
+            "!Idd", packet[: self.HEADER_SIZE]
+        )
+        data = packet[self.HEADER_SIZE :]
         return seq_num, timestamp, data
 
     def send_ack(self, ack_num, timestamp_echo):
@@ -55,7 +57,7 @@ class ReliableUDPClient:
 
     def send_request(self):
         """Send file request to server with retries"""
-        request = b'R'  # Request byte
+        request = b"R"  # Request byte
         max_retries = 5
         retry_timeout = 0.5
 
@@ -93,7 +95,7 @@ class ReliableUDPClient:
         self.total_packets_received += 1
 
         # Check if this is EOF
-        if data == b'EOF':
+        if data == b"EOF":
             self.send_ack(seq, timestamp)
             return True  # Signal completion
 
@@ -134,7 +136,7 @@ class ReliableUDPClient:
         first_packet = self.send_request()
 
         # Open output file
-        self.output_file = open('received_data.txt', 'wb')
+        self.output_file = open("received_data.txt", "wb")
 
         start_time = time.time()
 
@@ -172,7 +174,7 @@ class ReliableUDPClient:
 
         # Verify file
         try:
-            received_size = open('received_data.txt', 'rb').seek(0, 2)
+            received_size = open("received_data.txt", "rb").seek(0, 2)
         except:
             pass
 

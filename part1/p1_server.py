@@ -33,7 +33,7 @@ class ReliableUDPServer:
 
         # Buffers
         self.send_buffer = {}  # {seq: data}
-        self.in_flight = {}    # {seq: {'send_time': float, 'retx_count': int}}
+        self.in_flight = {}  # {seq: {'send_time': float, 'retx_count': int}}
 
         # Window management
         self.LAR = 0  # Last ACK Received
@@ -55,14 +55,14 @@ class ReliableUDPServer:
     def create_packet(self, seq_num, timestamp, timestamp_echo, data):
         """Create a packet with header and data"""
         # Pack: sequence number (4 bytes), timestamp (8 bytes), timestamp_echo (8 bytes)
-        header = struct.pack('!Idd', seq_num, timestamp, timestamp_echo)
+        header = struct.pack("!Idd", seq_num, timestamp, timestamp_echo)
         return header + data
 
     def parse_ack(self, packet):
         """Parse ACK packet"""
         if len(packet) < self.HEADER_SIZE:
             return None, None
-        ack_num, _, timestamp_echo = struct.unpack('!Idd', packet[:self.HEADER_SIZE])
+        ack_num, _, timestamp_echo = struct.unpack("!Idd", packet[: self.HEADER_SIZE])
         return ack_num, timestamp_echo
 
     def load_file(self, filepath):
@@ -71,7 +71,7 @@ class ReliableUDPServer:
             print(f"Error: File {filepath} not found")
             sys.exit(1)
 
-        self.file_handle = open(filepath, 'rb')
+        self.file_handle = open(filepath, "rb")
         self.file_size = os.path.getsize(filepath)
         print(f"Loaded file: {filepath}, size: {self.file_size} bytes")
 
@@ -103,10 +103,10 @@ class ReliableUDPServer:
 
         # Track in-flight
         if seq not in self.in_flight:
-            self.in_flight[seq] = {'send_time': timestamp, 'retx_count': 0}
+            self.in_flight[seq] = {"send_time": timestamp, "retx_count": 0}
         else:
-            self.in_flight[seq]['send_time'] = timestamp
-            self.in_flight[seq]['retx_count'] += 1
+            self.in_flight[seq]["send_time"] = timestamp
+            self.in_flight[seq]["retx_count"] += 1
 
         self.total_packets_sent += 1
         if is_retransmission:
@@ -114,7 +114,9 @@ class ReliableUDPServer:
 
     def send_packets_in_window(self):
         """Send packets within the current window"""
-        while (self.LFS - self.LAR < self.SWS) and (self.LFS < self.next_seq_to_prepare):
+        while (self.LFS - self.LAR < self.SWS) and (
+            self.LFS < self.next_seq_to_prepare
+        ):
             packet_data = self.send_buffer[self.LFS]
             self.send_packet(self.LFS, packet_data)
             self.LFS += len(packet_data)
@@ -135,7 +137,7 @@ class ReliableUDPServer:
         """Process received ACK"""
         # Update RTT if we have a valid timestamp echo
         if timestamp_echo > 0 and ack_num in self.in_flight:
-            sample_rtt = time.time() - self.in_flight[ack_num]['send_time']
+            sample_rtt = time.time() - self.in_flight[ack_num]["send_time"]
             if sample_rtt > 0:
                 self.update_rtt(sample_rtt)
 
@@ -166,7 +168,9 @@ class ReliableUDPServer:
             if self.dup_ack_count == 3:
                 print(f"Fast retransmit triggered for seq {ack_num}")
                 if ack_num in self.send_buffer:
-                    self.send_packet(ack_num, self.send_buffer[ack_num], is_retransmission=True)
+                    self.send_packet(
+                        ack_num, self.send_buffer[ack_num], is_retransmission=True
+                    )
                 self.dup_ack_count = 0
 
     def get_oldest_unacked_seq(self):
@@ -181,7 +185,7 @@ class ReliableUDPServer:
         if oldest_seq is None:
             return None
 
-        send_time = self.in_flight[oldest_seq]['send_time']
+        send_time = self.in_flight[oldest_seq]["send_time"]
         return send_time + self.rto
 
     def handle_timeout(self):
@@ -190,13 +194,15 @@ class ReliableUDPServer:
         if oldest_seq is not None:
             print(f"Timeout - retransmitting seq {oldest_seq}")
             if oldest_seq in self.send_buffer:
-                self.send_packet(oldest_seq, self.send_buffer[oldest_seq], is_retransmission=True)
+                self.send_packet(
+                    oldest_seq, self.send_buffer[oldest_seq], is_retransmission=True
+                )
                 # Exponential backoff
                 self.rto = self.rto * 2
 
     def send_eof(self):
         """Send EOF packet to signal end of transfer"""
-        eof_packet = self.create_packet(self.file_size, time.time(), 0.0, b'EOF')
+        eof_packet = self.create_packet(self.file_size, time.time(), 0.0, b"EOF")
         self.sock.sendto(eof_packet, self.client_addr)
         print("EOF packet sent")
 
@@ -214,7 +220,7 @@ class ReliableUDPServer:
         self.wait_for_client()
 
         # Load file
-        self.load_file('data.txt')
+        self.load_file("data.txt")
 
         # Initialize buffers
         self.ensure_buffer_filled()
