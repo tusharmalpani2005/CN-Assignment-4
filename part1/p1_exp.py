@@ -57,7 +57,7 @@ def run(expname):
     SERVER_PORT = 6555
     SWS = 5 * 1180
 
-    NUM_ITERATIONS = 1
+    NUM_ITERATIONS = 5
     OUTFILE = "received_data.txt"
     delay_list, loss_list, jitter_list = [], [], []
 
@@ -114,6 +114,7 @@ def run(expname):
                     md5_hash = compute_md5(OUTFILE)
                     # write the result to a file
                     f_out.write(f"{i},{LOSS},{DELAY},{JITTER},{md5_hash},{ttc}\n")
+                    f_out.flush()
 
                     # Stop the network
                     net.stop()
