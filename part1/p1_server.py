@@ -44,11 +44,9 @@ class ReliableUDPServer:
         self.dup_ack_count = 0
 
         # RTT and RTO
-        self.estimated_rtt = 1.0
-        self.dev_rtt = 0.5
-        self.rto = 3.0
-        self.min_rto = 0.2
-        self.max_rto = 60.0
+        self.estimated_rtt = 0.5
+        self.dev_rtt = 0.25
+        self.rto = 1.0
 
         # Statistics
         self.total_packets_sent = 0
@@ -131,8 +129,7 @@ class ReliableUDPServer:
         self.dev_rtt = 0.75 * self.dev_rtt + 0.25 * abs(sample_rtt - self.estimated_rtt)
 
         # Calculate RTO
-        self.rto = self.estimated_rtt + 4 * self.dev_rtt
-        self.rto = max(self.min_rto, min(self.rto, self.max_rto))
+        self.rto = self.estimated_rtt + 4.0 * self.dev_rtt
 
     def handle_ack(self, ack_num, timestamp_echo):
         """Process received ACK"""
@@ -195,7 +192,7 @@ class ReliableUDPServer:
             if oldest_seq in self.send_buffer:
                 self.send_packet(oldest_seq, self.send_buffer[oldest_seq], is_retransmission=True)
                 # Exponential backoff
-                self.rto = min(self.rto * 2, self.max_rto)
+                self.rto = self.rto * 2
 
     def send_eof(self):
         """Send EOF packet to signal end of transfer"""

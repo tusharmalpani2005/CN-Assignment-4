@@ -57,10 +57,9 @@ class ReliableUDPClient:
         """Send file request to server with retries"""
         request = b'R'  # Request byte
         max_retries = 5
-        retry_timeout = 2.0
+        retry_timeout = 0.5
 
         for attempt in range(max_retries):
-            print(f"Sending request to server (attempt {attempt + 1}/{max_retries})")
             self.sock.sendto(request, self.server_addr)
 
             try:
@@ -69,15 +68,11 @@ class ReliableUDPClient:
                 packet, addr = self.sock.recvfrom(2048)
 
                 if addr == self.server_addr:
-                    print("Request acknowledged by server")
                     # Set socket to blocking for main transfer
                     self.sock.settimeout(None)
                     return packet  # Return first packet
             except socket.timeout:
-                print(f"Request timeout (attempt {attempt + 1})")
                 continue
-
-        print("Error: Failed to connect to server after 5 attempts")
         sys.exit(1)
 
     def write_data(self, seq, data):
@@ -99,7 +94,6 @@ class ReliableUDPClient:
 
         # Check if this is EOF
         if data == b'EOF':
-            print("EOF received - transfer complete")
             self.send_ack(seq, timestamp)
             return True  # Signal completion
 
@@ -135,14 +129,12 @@ class ReliableUDPClient:
 
     def run(self):
         """Main client loop"""
-        print(f"Connecting to server {self.server_ip}:{self.server_port}")
 
         # Send request and get first packet
         first_packet = self.send_request()
 
         # Open output file
         self.output_file = open('received_data.txt', 'wb')
-        print("Receiving file...")
 
         start_time = time.time()
 
@@ -168,10 +160,8 @@ class ReliableUDPClient:
                     transfer_complete = self.handle_packet(seq, timestamp, data)
 
             except KeyboardInterrupt:
-                print("\nClient interrupted")
                 break
             except Exception as e:
-                print(f"Error: {e}")
                 break
 
         end_time = time.time()
@@ -180,18 +170,9 @@ class ReliableUDPClient:
         if self.output_file:
             self.output_file.close()
 
-        # Statistics
-        print(f"\n=== Transfer Complete ===")
-        print(f"Total time: {end_time - start_time:.2f} seconds")
-        print(f"Packets received: {self.total_packets_received}")
-        print(f"ACKs sent: {self.total_acks_sent}")
-        print(f"Duplicate packets: {self.duplicate_packets}")
-        print(f"Out-of-order packets buffered: {len(self.recv_buffer)}")
-
         # Verify file
         try:
             received_size = open('received_data.txt', 'rb').seek(0, 2)
-            print(f"Received file size: {received_size} bytes")
         except:
             pass
 
@@ -200,7 +181,6 @@ class ReliableUDPClient:
 
 def main():
     if len(sys.argv) != 3:
-        print("Usage: python3 p1_client.py <SERVER_IP> <SERVER_PORT>")
         sys.exit(1)
 
     server_ip = sys.argv[1]
@@ -210,7 +190,6 @@ def main():
     try:
         client.run()
     except KeyboardInterrupt:
-        print("\nClient interrupted")
         if client.output_file:
             client.output_file.close()
         client.sock.close()
