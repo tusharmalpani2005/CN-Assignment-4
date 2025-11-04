@@ -12,7 +12,7 @@ import threading
 from collections import defaultdict
 
 
-class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
+class ReliableUDPServer:
     """Server implementing a reliable UDP sender with SACK support."""
 
     def __init__(self, server_ip, server_port, sws):
@@ -22,7 +22,6 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
         self.sock = None
         self.client_addr = None
 
-        # use snake_case names
         self.mss = 1180
         self.header_size = 20
         self.max_payload = 1200
@@ -32,17 +31,14 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
         self.window = {}
         self.sack_blocks = []
 
-        self.estimated_rtt = 0.02
-        self.dev_rtt = 0.01
-        self.rto = 0.08
+        self.estimated_rtt = 0.05
+        self.dev_rtt = 0.025
+        self.rto = 0.1
         self.alpha = 0.125
         self.beta = 0.25
 
-        self.rtt_samples = []
-
         self.dup_ack_count = defaultdict(int)
         self.fast_retransmit_threshold = 3
-        self.last_dup_ack = None
 
         self.sacked_packets = set()
 
@@ -55,24 +51,13 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
 
-        self.packets_sent = 0
-        self.packets_retransmitted = 0
-        self.fast_retransmits = 0
-        self.timeout_retransmits = 0
-        self.sack_retransmits = 0
-        self.start_time = 0
-
     def create_packet(self, seq_num, data):
         """Return a packet bytes object with a 4-byte sequence number header."""
         header = struct.pack('!I', seq_num) + b'\x00' * 16
         return header + data
 
     def parse_ack(self, packet):
-        """Parse an ACK packet and return (ack_num, sack_blocks).
-
-        sack_blocks is a list of (start,end) tuples. If packet is malformed
-        returns (None, []).
-        """
+        """Parse an ACK packet and return (ack_num, sack_blocks)."""
         if len(packet) < 4:
             return None, []
 
@@ -85,14 +70,12 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
         if len(packet) >= 20:
             sack_data = packet[4:20]
             for i in range(0, 16, 8):
-                # each SACK block is 8 bytes: start(4), end(4)
                 try:
                     sack_start = struct.unpack('!I', sack_data[i:i+4])[0]
                     sack_end = struct.unpack('!I', sack_data[i+4:i+8])[0]
                 except struct.error:
                     break
 
-                # keep only valid blocks beyond cumulative ack
                 if 0 < sack_start < sack_end and sack_start >= ack_num:
                     sack_blocks.append((sack_start, sack_end))
 
@@ -110,7 +93,6 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
 
     def update_rto(self, sample_rtt):
         """Update RTO using exponential weighted moving averages."""
-        self.rtt_samples.append(sample_rtt)
         if self.estimated_rtt == 0:
             self.estimated_rtt = sample_rtt
             self.dev_rtt = sample_rtt / 2
@@ -119,15 +101,15 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
             self.dev_rtt = (1 - self.beta) * self.dev_rtt + \
                 self.beta * abs(sample_rtt - self.estimated_rtt)
         self.rto = self.estimated_rtt + 4 * self.dev_rtt
-        self.rto = max(0.001, min(10.0, self.rto))
+        self.rto = max(0.05, min(2.0, self.rto))  # Clamp between 50ms and 2s
 
     def send_data_packets(self):
         """Send as many data packets as the send window allows."""
         with self.lock:
-            bytes_in_flight = self.next_seq_num - self.send_base
+            # Count ALL unique unacked bytes (including SACKed packets)
+            bytes_in_flight = sum(len(data) for data, _ in self.window.values())
             available_window = self.sws - bytes_in_flight
 
-            # nothing to send
             if available_window <= 0 and \
                 not (self.next_seq_num >= self.file_size and not self.eof_sent):
                 return
@@ -141,7 +123,6 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
                 self.window[self.next_seq_num] = (data, time.time())
                 self.next_seq_num += packet_size
                 available_window -= packet_size
-                self.packets_sent += 1
 
             if self.next_seq_num >= self.file_size and not self.eof_sent:
                 eof_seq = self.file_size
@@ -150,7 +131,6 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
                 self.window[eof_seq] = (b'EOF', time.time())
                 self.eof_sent = True
                 self.eof_seq_num = eof_seq
-                self.packets_sent += 1
 
     def handle_ack(self, ack_num, sack_blocks):
         """Process an ACK and update send window, RTT and retransmissions."""
@@ -168,8 +148,6 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
                         packet = self.create_packet(self.send_base, data)
                         self.sock.sendto(packet, self.client_addr)
                         self.window[self.send_base] = (data, time.time())
-                        self.packets_retransmitted += 1
-                        self.fast_retransmits += 1
 
                 if sack_blocks and self.dup_ack_count[ack_num] >= self.fast_retransmit_threshold:
                     self.selective_retransmit(skip_send_base=True)
@@ -177,10 +155,14 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
 
             # new cumulative ACK
             if ack_num > self.send_base:
-                if self.send_base in self.window:
-                    _, send_time = self.window[self.send_base]
-                    sample_rtt = time.time() - send_time
-                    self.update_rto(sample_rtt)
+                # Sample RTT from ANY newly acknowledged packet
+                for seq_num in list(self.window.keys()):
+                    if seq_num >= self.send_base and seq_num < ack_num:
+                        if seq_num not in self.sacked_packets:
+                            _, send_time = self.window[seq_num]
+                            sample_rtt = time.time() - send_time
+                            self.update_rto(sample_rtt)
+                            break
 
                 self.send_base = ack_num
                 for seq in list(self.window.keys()):
@@ -194,7 +176,7 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
                     self.transfer_complete = True
 
     def selective_retransmit(self, skip_send_base=False):
-        """Retransmit packets indicated by SACK holes and older-than-half-RTO."""
+        """Retransmit ALL packets in SACK holes immediately (no throttling)."""
         if not self.sack_blocks or not self.window:
             return
 
@@ -202,47 +184,42 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
         first_sack_start = sorted_sacks[0][0]
         seqs_to_retransmit = []
 
+        # Packets before first SACK block
         for seq_num in sorted(self.window.keys()):
             if self.send_base <= seq_num < first_sack_start and seq_num not in self.sacked_packets:
                 if skip_send_base and seq_num == self.send_base:
                     continue
-                data, send_time = self.window[seq_num]
-                if time.time() - send_time > self.rto / 2:
-                    seqs_to_retransmit.append(seq_num)
+                seqs_to_retransmit.append(seq_num)
 
+        # Packets in holes between SACK blocks
         for i in range(len(sorted_sacks) - 1):
             hole_start = sorted_sacks[i][1]
             hole_end = sorted_sacks[i + 1][0]
             for seq_num in sorted(self.window.keys()):
                 if hole_start <= seq_num < hole_end and seq_num not in self.sacked_packets:
-                    data, send_time = self.window[seq_num]
-                    if time.time() - send_time > self.rto / 2 and seq_num not in seqs_to_retransmit:
+                    if seq_num not in seqs_to_retransmit:
                         seqs_to_retransmit.append(seq_num)
 
-
-        for seq_num in sorted(seqs_to_retransmit)[:3]:
+        # Retransmit ALL (no [:3] limit!)
+        for seq_num in sorted(seqs_to_retransmit):
             if seq_num in self.window:
                 data, _ = self.window[seq_num]
                 packet = self.create_packet(seq_num, data)
                 self.sock.sendto(packet, self.client_addr)
                 self.window[seq_num] = (data, time.time())
-                self.packets_retransmitted += 1
-                self.sack_retransmits += 1
 
     def retransmit_timeout_packets(self):
         """Retransmit any packet whose send time exceeded RTO."""
         current_time = time.time()
         with self.lock:
             for seq_num in list(self.window.keys()):
+                if seq_num in self.sacked_packets:
+                    continue
                 data, send_time = self.window[seq_num]
                 if current_time - send_time > self.rto:
-                    if seq_num in self.sacked_packets:
-                        continue
                     packet = self.create_packet(seq_num, data)
                     self.sock.sendto(packet, self.client_addr)
                     self.window[seq_num] = (data, current_time)
-                    self.packets_retransmitted += 1
-                    self.timeout_retransmits += 1
 
     def receive_thread(self):
         """Background thread that receives ACKs from the client."""
@@ -256,7 +233,6 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
             except socket.timeout:
                 continue
             except OSError:
-                # socket closed or network error — exit thread loop
                 break
 
     def run(self):
@@ -264,7 +240,6 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind((self.server_ip, self.server_port))
 
-        # initial one-byte request from client; the byte itself is unused
         _, self.client_addr = self.sock.recvfrom(1)
 
         try:
@@ -275,7 +250,6 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
             self.sock.close()
             return
 
-        self.start_time = time.time()
         recv_thread = threading.Thread(target=self.receive_thread)
         recv_thread.daemon = True
         recv_thread.start()
@@ -293,10 +267,11 @@ class ReliableUDPServer:  # pylint: disable=too-many-instance-attributes
             if eof_send_time and (time.time() - eof_send_time) > max_wait_after_eof:
                 break
 
-            time.sleep(0.001)
+            # Minimal sleep to avoid CPU spin
+            time.sleep(0.0001)
 
         if self.transfer_complete:
-            time.sleep(0.5)
+            time.sleep(0.2)
 
         self.stop_event.set()
         recv_thread.join(timeout=1)

@@ -86,6 +86,8 @@ def run(expname):
                         f"\n--- Running topology with {LOSS}% packet loss, base delay {DELAY}ms and jitter {JITTER}ms (iter {i+1}/{NUM_ITERATIONS})"
                     )
 
+                    os.system(f"rm -f {OUTFILE}")
+
                     # Create the custom topology with the specified loss, delay and jitter
                     topo = CustomTopo(loss=LOSS, delay=DELAY, jitter=JITTER)
 
